@@ -1,0 +1,254 @@
+# download kaggle in colab
+! pip install -q kaggle
+from google.colab import files
+files.upload() # upload kaggle.json file
+! mkdir ~/.kaggle
+! cp kaggle.json ~/.kaggle/
+! chmod 600 ~/.kaggle/kaggle.json
+! kaggle datasets download shrutisaxena/yoga-pose-image-classification-dataset #Dataset
+! apt install unzip 
+!unzip yoga-pose-image-classification-dataset.zip -d yoga_filtered.zip # make new directory to save unzip files
+#_______________________________________________________________________________________________________________________
+# check directory content
+import os
+
+base_dir ='./yoga_filtered.zip'
+
+print("Contents of base directory:")
+print(os.listdir(base_dir))
+
+print("\nContents of 107 directory:")
+print(os.listdir(f'{base_dir}/dataset'))
+#____________________________________________
+# make labels list 
+import numpy as np
+import pandas as pd
+import tensorflow as tf
+import os,cv2
+
+import warnings
+
+path_dir= '/content/yoga_filtered.zip/dataset'
+
+labels=[]
+
+for folder in os.listdir(path_dir):
+  labels.append(folder)
+labels.sort()
+labels = labels[0:13] #len=13
+print(labels)
+#_________________________________________________
+# train_images and train_labels
+train_images=[]
+train_labels=[]
+
+for i,folder in enumerate(labels):
+    try:
+        for image in os.listdir(path_dir+'/'+folder):
+            img = os.path.join(path_dir+'/'+folder+'/'+image)
+            img = cv2.imread(img)
+            img = cv2.resize(img,(256,256))
+            train_images.append(img)
+            train_labels.append(i)
+    except:
+        print(i,folder,image,img)
+train_images = np.asarray(train_images)
+train_labels = np.asarray(train_labels).astype('int64')
+#_______________________________________________________________
+#plot
+  import matplotlib.pyplot as plt
+for i in [300,400]:
+  plt.imshow(train_images[i])
+  plt.title(labels[train_labels[i]])
+  plt.show()
+#_________________________________________________________________
+# turn train_labels into matrix
+from tensorflow.keras.utils import to_categorical
+train_labels = to_categorical(train_labels,13)
+#___________________________________________________________________
+print(f'Our dataset have {train_images.shape[0]} images with shape {train_images.shape[1:]}')
+print(f'Our datasets have {train_labels.shape[0]} rows and {train_labels.shape[1]} labels')
+#_____________________________________________________________________________________________
+# train_test_split
+from sklearn.model_selection import train_test_split
+X_train,X_test,y_train,y_test = train_test_split(train_images,train_labels,test_size=0.1,shuffle= True)
+#______________________________________________________________________________________________________
+print(f'Shape of train_set {X_train.shape}')
+print(f'Shape of test_set {X_test.shape}')
+#____________________________________________
+#model without transfer_learning
+#import tensorflow.keras.backend as K
+
+#K.clear_session()
+
+#model = tf.keras.models.Sequential([tf.keras.Input(shape=(256, 256, 3)),
+ #                                   tf.keras.layers.RandomFlip('horizontal'),
+  #                                 tf.keras.layers.Rescaling(1. / 255),
+   #
+    #                                tf.keras.layers.Conv2D(32,(3,3),activation='relu'),
+     #                               tf.keras.layers.MaxPooling2D(2,2),
+      #                              tf.keras.layers.Dropout(0.3),
+       #
+        #                            tf.keras.layers.Conv2D(64,(3,3),activation='relu'),
+         #                           tf.keras.layers.MaxPooling2D(2,2),
+          #                          tf.keras.layers.Dropout(0.3),
+           #
+            #                        tf.keras.layers.Conv2D(64,(3,3),activation='relu'),
+             #                       tf.keras.layers.MaxPooling2D(2,2),
+              #                      tf.keras.layers.Dropout(0.5),
+              #
+               #                     tf.keras.layers.Flatten(),
+                #                    tf.keras.layers.Dense(512,activation='relu'),
+                 #                   tf.keras.layers.Dense(128,activation='relu'),
+                  #                  tf.keras.layers.Dense(13,activation='softmax')
+                   #                 ])
+#model.summary()
+#model.compile(optimizer='Adam',
+ #             loss='categorical_crossentropy',
+  #            metrics = ['accuracy'])
+#history = model.fit(X_train,y_train,
+ #                   batch_size = 32,
+  #                  epochs = 20,
+   #                 validation_split=0.2)
+#___________________________________________________________________________________________________________
+#transfer learning vgg16 model
+from tensorflow.keras.applications.vgg16 import VGG16
+from tensorflow.keras.applications.vgg16 import preprocess_input
+
+vgg_model = VGG16(weights='imagenet',
+                  include_top=False,
+                  input_shape =(256, 256, 3))
+vgg_model.trainable = False
+X_train = preprocess_input(X_train)
+X_test = preprocess_input(X_test)
+#_________________________________________________________________________
+#model
+from tensorflow.keras import layers, models
+model_transfer_1 = tf.keras.models.Sequential([
+    vgg_model,
+    layers.RandomFlip('horizontal'),
+    layers.RandomZoom(0.1),
+    layers.RandomRotation(10),
+    layers.Flatten(),
+    layers.Dense(128,activation='relu'),
+    layers.Dense(64,activation='relu'),
+    layers.Dense(13,activation='softmax'),
+])
+model_transfer_1.summary()
+
+  from tensorflow.keras.callbacks import EarlyStopping
+model_transfer_1.compile(optimizer = 'Adam',
+                         loss= 'categorical_crossentropy',
+                         metrics = ['accuracy'])
+callbacks= EarlyStopping(monitor='val_accuracy',mode='max',
+                         patience=5, restore_best_weights = True)
+history_model_transfer = model_transfer_1.fit(X_train,y_train,
+                                              epochs=20,
+                                              validation_split=0.2, batch_size=32,
+                                              callbacks=[callbacks])
+#______________________________________________________________________________________
+#save model
+model_transfer_1.save('YOGA.h5')
+#_______________________________________________________________________________________
+#plot acc and loss
+plt.plot(history_model_transfer.history['accuracy'])
+plt.plot(history_model_transfer.history['val_accuracy'])
+plt.title('model accuracy')
+plt.ylabel('accuracy')
+plt.xlabel('epoch')
+plt.legend(['train', 'val'], loc='upper left')
+plt.show()
+
+plt.plot(history_model_transfer.history['loss'])
+plt.plot(history_model_transfer.history['val_loss'])
+plt.title('model loss')
+plt.ylabel('loss')
+plt.xlabel('epoch')
+plt.legend(['train', 'val'], loc='upper left')
+plt.show()
+#________________________________________________________
+#predict
+import numpy as np
+from google.colab import files
+from tensorflow.keras.utils import load_img, img_to_array
+
+uploaded=files.upload()
+
+for fn in uploaded.keys():
+
+  # predicting images
+  path='/content/' + fn
+  img=load_img(path,target_size=(256,256,3))
+
+  x=img_to_array(img)
+  x= tf.expand_dims(x, 0)
+  predict = model_transfer_1.predict(x)
+  score = tf.nn.softmax(predict[0])
+  print(
+    "This image most likely belongs to {}"
+    .format(labels[np.argmax(score)])
+)
+#____________________________________________________________________
+# python GUI
+import tkinter as tk
+import tensorflow as tf
+from tkinter import filedialog
+from tkinter import *
+from PIL import ImageTk, Image
+import numpy as np
+from keras.preprocessing.image import img_to_array
+#load the trained model to classify the images
+from keras.models import load_model
+from keras.preprocessing.image import load_img
+model = load_model('YOGA.h5')
+
+#initialise GUI
+top=tk.Tk()
+top.geometry('800x600')
+top.title('Yoga Image Classification')
+top.configure(background='red')
+label=Label(top,background='black', font=('arial',15,'bold'))
+sign_image = Label(top)
+
+labels = ['adho mukha svanasana', 'adho mukha vriksasana', 'agnistambhasana', 'ananda balasana', 'anantasana', 'anjaneyasana', 'ardha bhekasana', 'ardha chandrasana', 'ardha matsyendrasana', 'ardha pincha mayurasana', 'ardha uttanasana', 'ashtanga namaskara', 'astavakrasana']
+
+def classify(file_path):
+    global label_packed
+    image = Image.open(file_path)
+    image = image.resize((256, 256))
+    image = img_to_array(image)
+    image = np.expand_dims(image, axis=0)
+    predict = model.predict(image)
+    score = tf.nn.softmax(predict[0])
+    score = ("This image most likely belongs to {}"
+             .format(labels[np.argmax(score)]))
+    label.configure(foreground='yellow', text=score)
+def show_classify_button(file_path):
+    classify_b=Button(top,text="Classify Image",
+   command=lambda: classify(file_path),padx=10,pady=5)
+    classify_b.configure(background='black', foreground='yellow',
+                         font=('arial',10,'bold'))
+    classify_b.place(relx=0.79,rely=0.46)
+def upload_image():
+    try:
+        file_path=filedialog.askopenfilename()
+        uploaded=Image.open(file_path)
+        uploaded.thumbnail(((top.winfo_width()/2),(top.winfo_height()/2)))
+        im=ImageTk.PhotoImage(uploaded)
+        sign_image.configure(image=im)
+        sign_image.image=im
+        label.configure(text='')
+        show_classify_button(file_path)
+    except:
+        pass
+upload=Button(top,text="Upload an image",command=upload_image,
+              padx=10,pady=5)
+upload.configure(background='black', foreground='yellow',
+                 font=('arial',10,'bold'))
+upload.pack(side=BOTTOM,pady=50)
+sign_image.pack(side=BOTTOM,expand=True)
+label.pack(side=BOTTOM,expand=True)
+heading = Label(top, text="Image Classification",pady=20, font=('arial',20,'bold'))
+heading.configure(background='black',foreground='yellow')
+heading.pack()
+top.mainloop()
